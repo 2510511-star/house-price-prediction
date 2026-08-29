@@ -1,51 +1,45 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import joblib
-import pickle
+from sklearn.ensemble import RandomForestRegressor
 import os
 
-# 1. 웹 페이지 기본 설정
+# 페이지 기본 설정
 st.set_page_config(page_title="AI 부동산 집값 예측기", page_icon="🏠", layout="centered")
 
 st.title("🏠 AI 기반 집값 변동률 예측 서비스")
-st.write("거시경제 지표를 조절하여 향후 집값 변동 추이를 예측해 보세요.")
+st.write("거시경제 지표를 입력하여 향후 집값 변동 추이를 예측해 보세요.")
 
-# 2. 모델 파일(.pkcls / .pkl) 자동 탐색 및 로드
+# 1. 학습 데이터 읽기 및 모델 자동 학습
 @st.cache_resource
-def load_model():
-    files = [f for f in os.listdir('.') if f.endswith('.pkcls') or f.endswith('.pkl')]
-    if not files:
-        return None, "모델 파일(.pkcls 또는 .pkl)을 찾을 수 없습니다."
-    
-    target_file = files[0]
-    
-    # pickle로 로드 시도
+def train_rf_model():
     try:
-        with open(target_file, 'rb') as f:
-            m = pickle.load(f)
-        return m, target_file
-    except Exception:
-        pass
+        # 업로드된 엑셀 파일 찾기 (.xlsx 파일 탐색)
+        excel_files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
+        if not excel_files:
+            return None, "엑셀 학습 데이터를 찾을 수 없습니다."
         
-    # joblib으로 로드 시도
-    try:
-        m = joblib.load(target_file)
-        return m, target_file
+        df = pd.read_excel(excel_files[0])
+        
+        features = [c for c in df.columns if c not in ['시간', '집값 변동률']]
+        X_train = df[features]
+        y_train = df['집값 변동률']
+        
+        model = RandomForestRegressor(random_state=42)
+        model.fit(X_train, y_train)
+        return model, None
     except Exception as e:
         return None, str(e)
 
-model, model_name = load_model()
+model, error_msg = train_rf_model()
 
 if model is None:
-    st.error(f"⚠️ 모델 불러오기 실패: {model_name}")
+    st.error(f"⚠️ 학습 데이터를 불러올 수 없습니다: {error_msg}")
     st.stop()
 
-st.success(f"✅ 학습된 Random Forest 모델 연결 성공! (`{model_name}`)")
-
+st.success("✅ Random Forest 예측 모델 준비 완료!")
 st.divider()
 
-# 3. 사용자 입력 화면 구성
+# 2. 사용자 입력 화면 구성
 st.subheader("📊 거시경제 및 부동산 지표 입력")
 
 col1, col2 = st.columns(2)
@@ -63,7 +57,7 @@ with col2:
 
 st.divider()
 
-# 4. 예측 실행 및 결과 출력
+# 3. 예측 실행
 if st.button("🔮 집값 변동률 예측하기", use_container_width=True):
     input_df = pd.DataFrame([{
         '건설공사비지수': cost_index,
@@ -74,29 +68,18 @@ if st.button("🔮 집값 변동률 예측하기", use_container_width=True):
         '미분양 현황': unsold
     }])
     
-    try:
-        if hasattr(model, 'predict'):
-            pred_val = model.predict(input_df)
-            if isinstance(pred_val, (np.ndarray, list, pd.Series)):
-                pred_val = pred_val[0]
+    pred_val = model.predict(input_df)[0]
+    
+    st.subheader("📈 예측 결과")
+    col_res1, col_res2 = st.columns(2)
+    
+    with col_res1:
+        st.metric(label="예측 집값 변동률", value=f"{pred_val:+.2f}%")
+        
+    with col_res2:
+        if pred_val > 0.1:
+            st.success("🔥 **상승세 전망**: 집값이 상승 흐름을 탈 가능성이 높습니다.")
+        elif pred_val < -0.1:
+            st.error("📉 **하락세 전망**: 집값이 조정되거나 하락할 가능성이 높습니다.")
         else:
-            pred_val = model(input_df.values)[0]
-            
-        pred_float = float(pred_val)
-        
-        st.subheader("📈 예측 결과")
-        col_res1, col_res2 = st.columns(2)
-        
-        with col_res1:
-            st.metric(label="예측 집값 변동률", value=f"{pred_float:+.2f}%")
-            
-        with col_res2:
-            if pred_float > 0.1:
-                st.success("🔥 **상승세 전망**: 집값이 상승 흐름을 탈 가능성이 높습니다.")
-            elif pred_float < -0.1:
-                st.error("📉 **하락세 전망**: 집값이 조정되거나 하락할 가능성이 높습니다.")
-            else:
-                st.info("➡️ **보합세 전망**: 집값이 큰 변동 없이 안정적인 흐름을 보일 것으로 예상됩니다.")
-                
-    except Exception as e:
-        st.error(f"예측 중 오류가 발생했습니다: {e}")
+            st.info("➡️ **보합세 전망**: 집값이 큰 변동 없이 안정적인 흐름을 보일 것으로 예상됩니다.")
