@@ -9,19 +9,23 @@ st.set_page_config(page_title="AI 부동산 집값 예측기", page_icon="🏠",
 st.title("🏠 AI 기반 집값 변동률 예측 서비스")
 st.write("거시경제 지표를 입력하여 향후 집값 변동 추이를 예측해 보세요.")
 
-# 1. 학습 데이터 자동 탐색 및 모델 학습
+# 1. 학습 데이터(.csv 또는 .xlsx) 자동 탐색 및 모델 학습
 @st.cache_resource
 def train_rf_model():
     all_files = os.listdir('.')
-    # 대소문자 구별 없이 .xlsx 또는 .xls 파일 탐색
-    excel_files = [f for f in all_files if f.lower().endswith(('.xlsx', '.xls'))]
+    # CSV, XLSX, XLS 파일 모두 탐색
+    data_files = [f for f in all_files if f.lower().endswith(('.csv', '.xlsx', '.xls'))]
     
-    if not excel_files:
-        return None, f"폴더 내에 엑셀 파일(.xlsx)이 없습니다. (현재 파일 목록: {all_files})"
+    if not data_files:
+        return None, f"폴더 내에 데이터 파일(.csv 또는 .xlsx)이 없습니다."
     
-    target_file = excel_files[0]
+    target_file = data_files[0]
     try:
-        df = pd.read_excel(target_file)
+        # CSV 파일이면 read_csv, 엑셀 파일이면 read_excel로 로드
+        if target_file.lower().endswith('.csv'):
+            df = pd.read_csv(target_file)
+        else:
+            df = pd.read_excel(target_file)
         
         # 입력 변수와 타겟 변수 분리
         features = [c for c in df.columns if c not in ['시간', '집값 변동률']]
@@ -32,13 +36,12 @@ def train_rf_model():
         model.fit(X_train, y_train)
         return model, target_file
     except Exception as e:
-        return None, f"엑셀 파일('{target_file}') 로드 실패: {e}"
+        return None, f"파일('{target_file}') 로드 실패: {e}"
 
 model, file_info = train_rf_model()
 
 if model is None:
     st.error(f"⚠️ {file_info}")
-    st.info("💡 GitHub 저장소에 `.xlsx` 엑셀 파일이 올바르게 올라가 있는지 확인해 주세요.")
     st.stop()
 
 st.success(f"✅ 학습 데이터 연결 성공! (`{file_info}`)")
