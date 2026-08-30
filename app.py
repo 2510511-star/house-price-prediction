@@ -49,7 +49,7 @@ if model is None:
     st.stop()
 
 # ------------------------------------------------------------------
-# 2. [고도화 1] 최상단 지역 선택 및 예측 기간 옵션 설정
+# 2. 최상단 지역 선택 및 예측 기간 옵션 설정
 # ------------------------------------------------------------------
 st.markdown("### 📍 1. 예측 대상 및 기간 설정")
 top_col1, top_col2 = st.columns(2)
@@ -72,7 +72,7 @@ with top_col2:
 st.divider()
 
 # ------------------------------------------------------------------
-# 3. 사용자 입력 세부 지표 구성
+# 3. 사용자 입력 세부 지표 구성 (M2 통화량 및 가계대출 추가)
 # ------------------------------------------------------------------
 st.markdown("### 📊 2. 거시경제 및 부동산 지표 입력")
 
@@ -94,6 +94,11 @@ with col1:
         min_value=80.0, max_value=200.0, value=131.00, step=0.1,
         help="공사비 상승에 따른 공급 위축 지표"
     )
+    m2 = st.number_input(
+        "M2 통화량 (조 원 또는 지수)", 
+        min_value=0.0, max_value=10000.0, value=4000.0, step=10.0,
+        help="시중 유동 통화량 지표"
+    )
 
 with col2:
     buyer_index = st.slider(
@@ -102,7 +107,6 @@ with col2:
         help="KB부동산 기준 매수자/매도자 비중 지수"
     )
     
-    # 지역 선택에 따른 미분양 기본 안내 가이드
     unsold_default = 15000 if "수도권" in region else 50000
     unsold = st.number_input(
         "미분양 주택 수 (호)", 
@@ -116,6 +120,12 @@ with col2:
         format_func=lambda x: "해제 (0.0)" if x==0 else ("부분 지정 (0.5)" if x==0.5 else "강력 지정 (1.0)"),
         help="투기과열지구 및 조정대상지역 규제 수위"
     )
+    
+    debt = st.number_input(
+        "가계대출 (조 원 또는 지수)", 
+        min_value=0.0, max_value=5000.0, value=1100.0, step=10.0,
+        help="가계대출 총잔액 또는 변동 지표"
+    )
 
 st.divider()
 
@@ -126,33 +136,36 @@ if st.button("🔮 집값 변동률 예측하기", use_container_width=True):
     try:
         expected_features = list(model.feature_names_in_)
         
-        # 지역 특성 가중치 보정 (지방일 경우 미분양 민감도 가중 반영)
+        # 지방 선택 시 미분양 가중치 반영
         adjusted_unsold = unsold * 1.35 if "지방" in region else unsold
         
+        # 컬럼 매핑
         input_data = {}
         for col in expected_features:
-            col_clean = col.replace(" ", "")
+            col_clean = col.replace(" ", "").lower()
             if "금리" in col_clean:
                 input_data[col] = rate
-            elif "DSR" in col_clean or "dsr" in col_clean.lower():
+            elif "dsr" in col_clean:
                 input_data[col] = dsr
             elif "공사비" in col_clean:
                 input_data[col] = cost_index
+            elif "m2" in col_clean or "통화" in col_clean:
+                input_data[col] = m2
             elif "매수" in col_clean:
                 input_data[col] = buyer_index
             elif "미분양" in col_clean:
                 input_data[col] = adjusted_unsold
             elif "규제" in col_clean:
                 input_data[col] = regulation
+            elif "대출" in col_clean or "가계" in col_clean:
+                input_data[col] = debt
             else:
                 input_data[col] = 0.0
 
         input_df = pd.DataFrame([input_data])[expected_features]
-        
-        # 기본 예측값 (월간 변동률 기준)
         base_pred = model.predict(input_df)[0]
         
-        # [고도화 3] 예측 기간 단위 환산
+        # 기간 환산
         if "주간" in timeframe:
             final_pred = base_pred / 4.33
             period_label = "주간"
@@ -163,7 +176,6 @@ if st.button("🔮 집값 변동률 예측하기", use_container_width=True):
             final_pred = base_pred
             period_label = "월간"
 
-        # 결과 출력
         st.subheader(f"📈 [{region}] {period_label} 집값 예측 결과")
         
         res_col1, res_col2 = st.columns(2)
@@ -175,18 +187,17 @@ if st.button("🔮 집값 변동률 예측하기", use_container_width=True):
             )
             
         with res_col2:
-            if final_pred > (0.1 / (4.33 if "주간" in timeframe else 1)):
-                st.success("🔥 **상승세 전망**: 해당 지역 집값이 상승 흐름을 타올라갈 가능성이 높습니다.")
-            elif final_pred < (-0.1 / (4.33 if "주간" in timeframe else 1)):
+            threshold = 0.1 / (4.33 if "주간" in timeframe else 1)
+            if final_pred > threshold:
+                st.success("🔥 **상승세 전망**: 해당 지역 집값이 상승 흐름을 탈 가능성이 높습니다.")
+            elif final_pred < -threshold:
                 st.error("📉 **하락세 전망**: 해당 지역 집값이 조정되거나 하락할 가능성이 높습니다.")
             else:
                 st.info("➡️ **보합세 전망**: 집값이 큰 변동 없이 안정적인 흐름을 보일 것으로 예상됩니다.")
 
         st.divider()
 
-        # --------------------------------------------------------------
-        # [고도화 2] 지표별 가중치(영향력 %) 시각화
-        # --------------------------------------------------------------
+        # 지표별 가중치(영향력 %) 차트 출력
         st.subheader("💡 지표별 영향력(가중치) 분석")
         st.caption("AI 모델이 이번 예측 결과를 산출할 때 각 경제 지표에 부여한 중요도 비율입니다.")
         
@@ -196,7 +207,6 @@ if st.button("🔮 집값 변동률 예측하기", use_container_width=True):
             '영향력 (%)': importances
         }).sort_values(by='영향력 (%)', ascending=True)
         
-        # 가중치 차트 출력
         st.bar_chart(importance_df.set_index('지표명'), horizontal=True)
 
     except Exception as e:
