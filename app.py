@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
 import os
+from sklearn.ensemble import RandomForestRegressor
 
 # 페이지 기본 설정
 st.set_page_config(page_title="AI 부동산 집값 예측기", page_icon="🏠", layout="centered")
@@ -9,34 +9,39 @@ st.set_page_config(page_title="AI 부동산 집값 예측기", page_icon="🏠",
 st.title("🏠 AI 기반 집값 변동률 예측 서비스")
 st.write("거시경제 지표를 입력하여 향후 집값 변동 추이를 예측해 보세요.")
 
-# 1. 학습 데이터 읽기 및 모델 자동 학습
+# 1. 학습 데이터 자동 탐색 및 모델 학습
 @st.cache_resource
 def train_rf_model():
+    all_files = os.listdir('.')
+    # 대소문자 구별 없이 .xlsx 또는 .xls 파일 탐색
+    excel_files = [f for f in all_files if f.lower().endswith(('.xlsx', '.xls'))]
+    
+    if not excel_files:
+        return None, f"폴더 내에 엑셀 파일(.xlsx)이 없습니다. (현재 파일 목록: {all_files})"
+    
+    target_file = excel_files[0]
     try:
-        # 업로드된 엑셀 파일 찾기 (.xlsx 파일 탐색)
-        excel_files = [f for f in os.listdir('.') if f.endswith('.xlsx')]
-        if not excel_files:
-            return None, "엑셀 학습 데이터를 찾을 수 없습니다."
+        df = pd.read_excel(target_file)
         
-        df = pd.read_excel(excel_files[0])
-        
+        # 입력 변수와 타겟 변수 분리
         features = [c for c in df.columns if c not in ['시간', '집값 변동률']]
         X_train = df[features]
         y_train = df['집값 변동률']
         
         model = RandomForestRegressor(random_state=42)
         model.fit(X_train, y_train)
-        return model, None
+        return model, target_file
     except Exception as e:
-        return None, str(e)
+        return None, f"엑셀 파일('{target_file}') 로드 실패: {e}"
 
-model, error_msg = train_rf_model()
+model, file_info = train_rf_model()
 
 if model is None:
-    st.error(f"⚠️ 학습 데이터를 불러올 수 없습니다: {error_msg}")
+    st.error(f"⚠️ {file_info}")
+    st.info("💡 GitHub 저장소에 `.xlsx` 엑셀 파일이 올바르게 올라가 있는지 확인해 주세요.")
     st.stop()
 
-st.success("✅ Random Forest 예측 모델 준비 완료!")
+st.success(f"✅ 학습 데이터 연결 성공! (`{file_info}`)")
 st.divider()
 
 # 2. 사용자 입력 화면 구성
