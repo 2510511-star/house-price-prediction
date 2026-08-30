@@ -13,21 +13,18 @@ st.write("거시경제 지표를 입력하여 향후 집값 변동 추이를 예
 @st.cache_resource
 def train_rf_model():
     all_files = os.listdir('.')
-    # CSV, XLSX, XLS 파일 모두 탐색
     data_files = [f for f in all_files if f.lower().endswith(('.csv', '.xlsx', '.xls'))]
     
     if not data_files:
-        return None, f"폴더 내에 데이터 파일(.csv 또는 .xlsx)이 없습니다."
+        return None, "폴더 내에 데이터 파일(.csv 또는 .xlsx)이 없습니다."
     
     target_file = data_files[0]
     try:
-        # CSV 파일이면 read_csv, 엑셀 파일이면 read_excel로 로드
         if target_file.lower().endswith('.csv'):
             df = pd.read_csv(target_file)
         else:
             df = pd.read_excel(target_file)
         
-        # 입력 변수와 타겟 변수 분리
         features = [c for c in df.columns if c not in ['시간', '집값 변동률']]
         X_train = df[features]
         y_train = df['집값 변동률']
@@ -67,27 +64,46 @@ st.divider()
 
 # 3. 예측 실행
 if st.button("🔮 집값 변동률 예측하기", use_container_width=True):
-    input_df = pd.DataFrame([{
-        '건설공사비지수': cost_index,
-        '기준금리': rate,
-        '스트레스 DSR': dsr,
-        '핵심규제지역': regulation,
-        '매수우위지수': buyer_index,
-        '미분양 현황': unsold
-    }])
-    
-    pred_val = model.predict(input_df)[0]
-    
-    st.subheader("📈 예측 결과")
-    col_res1, col_res2 = st.columns(2)
-    
-    with col_res1:
-        st.metric(label="예측 집값 변동률", value=f"{pred_val:+.2f}%")
+    try:
+        # 모델 학습 시 사용된 실제 컬럼 이름 및 순서 가져오기
+        expected_features = list(model.feature_names_in_)
         
-    with col_res2:
-        if pred_val > 0.1:
-            st.success("🔥 **상승세 전망**: 집값이 상승 흐름을 탈 가능성이 높습니다.")
-        elif pred_val < -0.1:
-            st.error("📉 **하락세 전망**: 집값이 조정되거나 하락할 가능성이 높습니다.")
-        else:
-            st.info("➡️ **보합세 전망**: 집값이 큰 변동 없이 안정적인 흐름을 보일 것으로 예상됩니다.")
+        # 컬럼명 자동 매핑 (띄어쓰기 및 명칭 차이 해결)
+        input_data = {}
+        for col in expected_features:
+            col_clean = col.replace(" ", "")
+            if "금리" in col_clean:
+                input_data[col] = rate
+            elif "DSR" in col_clean or "dsr" in col_clean.lower():
+                input_data[col] = dsr
+            elif "공사비" in col_clean:
+                input_data[col] = cost_index
+            elif "매수" in col_clean:
+                input_data[col] = buyer_index
+            elif "미분양" in col_clean:
+                input_data[col] = unsold
+            elif "규제" in col_clean:
+                input_data[col] = regulation
+            else:
+                input_data[col] = 0.0
+
+        # 정확한 컬럼 순서대로 데이터프레임 재구성
+        input_df = pd.DataFrame([input_data])[expected_features]
+        
+        pred_val = model.predict(input_df)[0]
+        
+        st.subheader("📈 예측 결과")
+        col_res1, col_res2 = st.columns(2)
+        
+        with col_res1:
+            st.metric(label="예측 집값 변동률", value=f"{pred_val:+.2f}%")
+            
+        with col_res2:
+            if pred_val > 0.1:
+                st.success("🔥 **상승세 전망**: 집값이 상승 흐름을 탈 가능성이 높습니다.")
+            elif pred_val < -0.1:
+                st.error("📉 **하락세 전망**: 집값이 조정되거나 하락할 가능성이 높습니다.")
+            else:
+                st.info("➡️ **보합세 전망**: 집값이 큰 변동 없이 안정적인 흐름을 보일 것으로 예상됩니다.")
+    except Exception as e:
+        st.error(f"예측 처리 중 오류가 발생했습니다: {e}")
